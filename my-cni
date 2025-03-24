@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+#set -e
+
+# Read config from stdin
+CONFIG=$(cat /dev/stdin)
+
+#Parse configuration
+SUBNET=$(echo $CONFIG | /bin/grep -o '"subnet": *"[^"]*"' | /bin/grep -o '"[^"]*"$' | /bin/tr -d '"')
+if [ -z "$SUBNET" ]; then
+  SUBNET="10.112.0.0/16"  # Default subnet
+fi
+
+COMMAND=${CNI_COMMAND}
+CONTAINER_ID=${CNI_CONTAINERID}
+IFNAME=${CNI_IFNAME:-eth0}
+NETNS=$(basename ${CNI_NETNS})
+
+allocate_ip() {
+  # Simple IP allocation - use the container ID hash to create a number
+  # In real environments, use proper IPAM plugins
+  local octet4=$(echo $CONTAINER_ID | /bin/md5sum | /bin/tr -dc '0-9' | /bin/cut -c1-3)
+  octet4=$((octet4 % 250 + 1)) # Ensure it's between 1-250
+  
+  # Extract first three octets from subnet
+  local prefix=$(echo $SUBNET | /bin/cut -d'/' -f1 | /bin/cut -d'.' -f1-3)
+  echo "${prefix}.${octet4}"
+}
+
+handle_add() {
+# create veth
+VETH_HOST="veth$(echo $CONTAINER_ID | cut -c1-8)"
+VETH_NETNS=veth_netns
+ip link add ${VETH_HOST} type veth peer name ${VETH_NETNS}
+
+# put one of the veth interfaces into the new network namespace
+ip link set ${VETH_NETNS} netns ${NETNS}
+
+# assign IP to veth interface inside the new network namespace
+IP_VETH_NETNS=$(allocate_ip)
+#IP_VETH_NETNS=10.244.0.20
+CIDR_VETH_NETNS=${IP_VETH_NETNS}/32
+ip -n ${NETNS} addr add ${CIDR_VETH_NETNS} dev ${VETH_NETNS}
+
+ if ! ip link show cni0 &>/dev/null; then
+   echo "Creating bridge cni0"
+   ip link add name cni0 type bridge
+   ip link set cni0 up
+   ip addr add 10.112.0.1/24 dev cni0
+ fi
+
+ip link set $VETH_HOST master cni0
+ip link set $VETH_HOST up
+
+ip -n ${NETNS} link set ${VETH_NETNS} name ${IFNAME}
+ip -n ${NETNS} link set ${CNI_IFNAME} up
+ip -n ${NETNS} route add 10.112.0.1 dev ${IFNAME}
+ip -n ${NETNS} route add default via 10.112.0.1 dev ${IFNAME}
+
+# return a JSON via stdout
+RETURN_TEMPLATE='
+{
+  "cniVersion": "1.0.0",
+  "interfaces": [
+    {
+      "name": "%s",
+      "mac": "%s"
+    },
+    {
+      "name": "%s",
+      "mac": "%s",
+      "sandbox": "%s"
+    }
+  ],
+  "ips": [
+    {
+      "address": "%s",
+      "interface": 1
+    }
+  ]
+}'
+
+MAC_HOST_VETH=$(ip link show ${VETH_HOST} | grep link | awk '{print$2}')
+MAC_NETNS_VETH=$(ip -netns $nsname link show ${CNI_IFNAME} | grep link | awk '{print$2}')
+
+RETURN=$(printf "${RETURN_TEMPLATE}" "${VETH_HOST}" "${MAC_HOST_VETH}" "${CNI_IFNAME}" "${mac_netns_veth}" "${CNI_NETNS}" "${CIDR_VETH_NETNS}")
+echo ${RETURN}
+}
+
+handle_del() {
+  echo "Cleaning up networking for $CONTAINER_ID"
+  
+  # If namespace is gone, nothing to do
+  if [ ! -e "$NETNS" ]; then
+    echo "Namespace $NETNS no longer exists"
+    exit 0
+  fi
+  
+  # Delete the interface in the namespace (if it exists)
+  ip -n $NETNS link del $IFNAME &>/dev/null || true
+  
+  echo "Cleanup complete"
+}
+
+case $COMMAND in
+  ADD)
+    handle_add
+    ;;
+  DEL)
+    handle_del
+    ;;
+  GET)
+    echo "GET operation not supported"
+    exit 1
+    ;;
+  VERSION)
+    echo '{"cniVersion":"1.0.0"}'
+    ;;
+  *)
+    echo "Unknown command: $COMMAND"
+    exit 1
+    ;;
+esac
+
+
