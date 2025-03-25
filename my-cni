@@ -5,9 +5,24 @@
 CONFIG=$(cat /dev/stdin)
 
 #Parse configuration
+CNI_VERSION=$(echo $CONFIG | /bin/grep -o '"cniVersion": *"[^"]*"' | /bin/grep -o '"[^"]*"$' | /bin/tr -d '"')
+if [ -z "$CNI_VERSION" ]; then
+ CNI_VERSION="1.0.0"  # Default version
+fi
+
 SUBNET=$(echo $CONFIG | /bin/grep -o '"subnet": *"[^"]*"' | /bin/grep -o '"[^"]*"$' | /bin/tr -d '"')
 if [ -z "$SUBNET" ]; then
   SUBNET="10.112.0.0/16"  # Default subnet
+fi
+
+GATEWAY=$(echo $CONFIG | /bin/grep -o '"gateway": *"[^"]*"' | /bin/grep -o '"[^"]*"$' | /bin/tr -d '"')
+if [ -z "$GATEWAY" ]; then
+  GATEWAY="10.112.0.1"  # Default gateway
+fi
+
+BRIDGE=$(echo $CONFIG | /bin/grep -o '"bridge": *"[^"]*"' | /bin/grep -o '"[^"]*"$' | /bin/tr -d '"')
+if [ -z "$BRIDGE" ]; then
+  BRIDGE="cni01"  # Default bridge
 fi
 
 COMMAND=${CNI_COMMAND}
@@ -37,29 +52,28 @@ ip link set ${VETH_NETNS} netns ${NETNS}
 
 # assign IP to veth interface inside the new network namespace
 IP_VETH_NETNS=$(allocate_ip)
-#IP_VETH_NETNS=10.244.0.20
 CIDR_VETH_NETNS=${IP_VETH_NETNS}/32
 ip -n ${NETNS} addr add ${CIDR_VETH_NETNS} dev ${VETH_NETNS}
 
- if ! ip link show cni0 &>/dev/null; then
-   echo "Creating bridge cni0"
-   ip link add name cni0 type bridge
-   ip link set cni0 up
-   ip addr add 10.112.0.1/24 dev cni0
+ if ! ip link show ${BRIDGE} &>/dev/null; then
+   echo "Creating bridge ${BRIDGE}"
+   ip link add name ${BRIDGE} type bridge
+   ip link set ${BRIDGE} up
+   ip addr add ${GATEWAY}/24 dev $BRIDGE
  fi
 
-ip link set $VETH_HOST master cni0
+ip link set $VETH_HOST master $BRIDGE
 ip link set $VETH_HOST up
 
 ip -n ${NETNS} link set ${VETH_NETNS} name ${IFNAME}
 ip -n ${NETNS} link set ${CNI_IFNAME} up
-ip -n ${NETNS} route add 10.112.0.1 dev ${IFNAME}
-ip -n ${NETNS} route add default via 10.112.0.1 dev ${IFNAME}
+ip -n ${NETNS} route add ${GATEWAY} dev ${IFNAME}
+ip -n ${NETNS} route add default via ${GATEWAY} dev ${IFNAME}
 
 # return a JSON via stdout
 RETURN_TEMPLATE='
 {
-  "cniVersion": "1.0.0",
+  "cniVersion": "%s",
   "interfaces": [
     {
       "name": "%s",
@@ -82,7 +96,7 @@ RETURN_TEMPLATE='
 MAC_HOST_VETH=$(ip link show ${VETH_HOST} | grep link | awk '{print$2}')
 MAC_NETNS_VETH=$(ip -netns $nsname link show ${CNI_IFNAME} | grep link | awk '{print$2}')
 
-RETURN=$(printf "${RETURN_TEMPLATE}" "${VETH_HOST}" "${MAC_HOST_VETH}" "${CNI_IFNAME}" "${mac_netns_veth}" "${CNI_NETNS}" "${CIDR_VETH_NETNS}")
+RETURN=$(printf "${RETURN_TEMPLATE}" "${CNI_VERSION}" "${VETH_HOST}" "${MAC_HOST_VETH}" "${CNI_IFNAME}" "${mac_netns_veth}" "${CNI_NETNS}" "${CIDR_VETH_NETNS}")
 echo ${RETURN}
 }
 
@@ -109,7 +123,7 @@ case $COMMAND in
     handle_del
     ;;
   GET)
-    echo "GET operation not supported"
+    echo "GET operation still in development :)"
     exit 1
     ;;
   VERSION)
@@ -120,5 +134,3 @@ case $COMMAND in
     exit 1
     ;;
 esac
-
-
