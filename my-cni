@@ -127,7 +127,7 @@ case $COMMAND in
     exit 1
     ;;
   VERSION)
-    echo '{"cniVersion":"1.0.0"}'
+    echo "{\"cniVersion\":\"$CNI_VERSION\"}"
     ;;
   *)
     echo "Unknown command: $COMMAND"
