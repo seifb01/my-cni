@@ -122,8 +122,12 @@ case $COMMAND in
   DEL)
     handle_del
     ;;
-  GET)
-    echo "GET operation still in development :)"
+  CHECK)
+    echo "CHECK operation still in development :)"
+    exit 1
+    ;;
+  GC)
+    echo "GC operation still in development :)"
     exit 1
     ;;
   VERSION)
