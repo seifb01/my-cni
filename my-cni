@@ -115,6 +115,28 @@ handle_del() {
   echo "Cleanup complete"
 }
 
+handle_check() {
+  checks=()
+   if [ ! -e "$NETNS" ]; then
+        checks+=('{"type": "network-namespace", "status": "failure", "msg": "Network namespace does not exist"}')
+   else
+       checks+=('{"type": "network-namespace", "status": "success"}')
+   fi
+
+   ip -n "$NETNS" link show >/dev/null 2>&1
+   if [ $? -ne 0 ]; then
+       checks+=('{"type": "interfaces", "status": "failure", "msg": "Unable to list network interfaces"}')
+   else
+       checks+=('{"type": "interfaces", "status": "success"}')
+   fi
+
+   result=$(printf '%s\n' "${checks[@]}" | jq -s '.')
+   
+   # Output result
+   echo "{\"result\": $result}"
+   exit 0
+}
+
 case $COMMAND in
   ADD)
     handle_add
@@ -123,11 +145,10 @@ case $COMMAND in
     handle_del
     ;;
   CHECK)
-    echo "CHECK operation still in development :)"
-    exit 1
+    handle_check
     ;;
   GC)
-    echo "GC operation still in development :)"
+    echo "GC operation not implemented yet"
     exit 1
     ;;
   VERSION)
