@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 #set -e
+# Log file path
+LOG_FILE="/var/log/my-cni.log"
+
+# Try to create the log file if it doesn't exist
+if [ ! -f "${LOG_FILE}" ]; then
+  touch "${LOG_FILE}" 2>/dev/null
+fi
 
 # Read config from stdin
 CONFIG=$(cat /dev/stdin)
@@ -30,6 +37,13 @@ CONTAINER_ID=${CNI_CONTAINERID}
 IFNAME=${CNI_IFNAME:-eth0}
 NETNS=$(basename ${CNI_NETNS})
 
+log() {
+  STATUS=$1
+  MSG=$2
+  TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S %Z")
+  echo "[${TIMESTAMP}] [${STATUS}] ${MSG}" >> ${LOG_FILE}
+}
+
 allocate_ip() {
   # Simple IP allocation - use the container ID hash to create a number
   # In real environments, use proper IPAM plugins
@@ -38,6 +52,7 @@ allocate_ip() {
   
   # Extract first three octets from subnet
   local prefix=$(echo $SUBNET | /bin/cut -d'/' -f1 | /bin/cut -d'.' -f1-3)
+  log "INFO" "${prefix}.${octet4}"
   echo "${prefix}.${octet4}"
 }
 
@@ -54,9 +69,10 @@ ip link set ${VETH_NETNS} netns ${NETNS}
 IP_VETH_NETNS=$(allocate_ip)
 CIDR_VETH_NETNS=${IP_VETH_NETNS}/32
 ip -n ${NETNS} addr add ${CIDR_VETH_NETNS} dev ${VETH_NETNS}
+log "INFO" "assigned $CIDR_VETH_NETNS to the container $CONTAINER_ID"
 
  if ! ip link show ${BRIDGE} &>/dev/null; then
-   echo "Creating bridge ${BRIDGE}"
+   log "INFO"  "Creating bridge ${BRIDGE}"
    ip link add name ${BRIDGE} type bridge
    ip link set ${BRIDGE} up
    ip addr add ${GATEWAY}/24 dev $BRIDGE
@@ -97,21 +113,23 @@ MAC_HOST_VETH=$(ip link show ${VETH_HOST} | grep link | awk '{print$2}')
 MAC_NETNS_VETH=$(ip -netns $nsname link show ${CNI_IFNAME} | grep link | awk '{print$2}')
 
 RETURN=$(printf "${RETURN_TEMPLATE}" "${CNI_VERSION}" "${VETH_HOST}" "${MAC_HOST_VETH}" "${CNI_IFNAME}" "${mac_netns_veth}" "${CNI_NETNS}" "${CIDR_VETH_NETNS}")
+log "INFO" "$RETURN"
 echo ${RETURN}
 }
 
 handle_del() {
-  echo "Cleaning up networking for $CONTAINER_ID"
+  log "INFO" "Cleaning up networking for $CONTAINER_ID"
   
   # If namespace is gone, nothing to do
   if [ ! -e "$NETNS" ]; then
-    echo "Namespace $NETNS no longer exists"
+    log "INFO" "Namespace $NETNS no longer exists"
     exit 0
   fi
   
   # Delete the interface in the namespace (if it exists)
   ip -n $NETNS link del $IFNAME &>/dev/null || true
-  
+
+  log "INFO" "Cleanup complete"
   echo "Cleanup complete"
 }
 
@@ -133,6 +151,7 @@ handle_check() {
    result=$(printf '%s\n' "${checks[@]}" | jq -s '.')
    
    # Output result
+   log "INFO" "{\"result\": $result}"
    echo "{\"result\": $result}"
    exit 0
 }
