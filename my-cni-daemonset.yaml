@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: my-cni
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: my-cni
+  template:
+    metadata:
+      labels:
+        app: my-cni
+    spec:
+      # required 
+      hostNetwork: true
+      tolerations:
+        # schedule on nodes that are not ready (example: node without a CNI)
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoSchedule
+        # schedule on control-plane nodes
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: my-cni
+          image: my-cni:1.0.0
+          volumeMounts:
+            - name: netd
+              mountPath: /etc/cni/net.d
+            - name: cnibin
+              mountPath: /opt/cni/bin
+      # hostPath to get access to the node filesystem
+      volumes:
+        - name: netd
+          hostPath:
+            path: /etc/cni/net.d
+        - name: cnibin
+          hostPath:
+            path: /opt/cni/bin
