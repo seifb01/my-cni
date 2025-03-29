@@ -2,14 +2,14 @@ CLUSTER_NAME?=my-cni
 
 .PHONY: cluster create init setup start up
 cluster create init setup start up:
-	kind create cluster --config kind.yaml --name ${CLUSTER_NAME}
+	kind create cluster --config kind/kind.yaml --name ${CLUSTER_NAME}
 	kubectl delete deploy -n kube-system coredns
 	kubectl delete deploy -n local-path-storage local-path-provisioner
 
 .PHONY: cni cp copy
 cni cp copy:
-	docker cp 10-my-cni.conf my-cni-control-plane:/etc/cni/net.d/10-my-cni.conf
-	docker cp my-cni my-cni-control-plane:/opt/cni/bin/my-cni
+	docker cp cni/10-my-cni.conf my-cni-control-plane:/etc/cni/net.d/10-my-cni.conf
+	docker cp cni/my-cni my-cni-control-plane:/opt/cni/bin/my-cni
 	docker exec my-cni-control-plane chmod +x /opt/cni/bin/my-cni
 
 .PHONY: test
@@ -26,6 +26,6 @@ delete destroy down stop:
 
 .PHONY: daemonset ds
 daemonset ds:
-	docker build -t my-cni:1.0.0 .
+	docker build --no-cache -t my-cni:1.0.0 .
 	kind load docker-image my-cni:1.0.0 --name my-cni
-	kubectl apply -f my-cni-daemonset.yaml
+	kubectl apply -f deploy/my-cni-daemonset.yaml
