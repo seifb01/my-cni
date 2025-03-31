@@ -3,8 +3,6 @@ CLUSTER_NAME?=my-cni
 .PHONY: cluster create init setup start up
 cluster create init setup start up:
 	kind create cluster --config kind/kind.yaml --name ${CLUSTER_NAME}
-	kubectl delete deploy -n kube-system coredns
-	kubectl delete deploy -n local-path-storage local-path-provisioner
 
 .PHONY: cni cp copy
 cni cp copy:
